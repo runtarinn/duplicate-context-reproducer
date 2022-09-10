@@ -41,7 +41,7 @@ class Reproducer
 
   @BeforeEach
   void setUp(Vertx vertx, VertxTestContext testContext, WireMockRuntimeInfo wireMockRuntimeInfo) throws Exception
-  {
+  {    
     webServerPort = getRandomPort();
     router = Router.router(vertx);
     server = vertx.createHttpServer(new HttpServerOptions().setPort(webServerPort).setHost("localhost"));
@@ -79,9 +79,9 @@ class Reproducer
 
         rc.data().put("context", Vertx.currentContext().toString());
 
-        //Future.succeededFuture()
         getData(wireMockRuntimeInfo)
-          .onComplete(arr -> getData(wireMockRuntimeInfo)
+          .onComplete(arr -> sleep(1))
+          .onComplete(arr-> getData(wireMockRuntimeInfo)
             .onComplete(ar -> {
               var initialContext = rc.get("context");
               var currentContext = Vertx.currentContext().toString();
@@ -100,7 +100,7 @@ class Reproducer
       .onSuccess(req -> {
         req.response()
           .onSuccess(res -> testContext.verify(() -> {
-            assertThat(res).extracting(
+            assertThat(res).extracting(              
               HttpClientResponse::statusCode,
               HttpClientResponse::statusMessage
             ).contains(
@@ -116,27 +116,13 @@ class Reproducer
       .onFailure(testContext::failNow);
   }
 
-  Future<JsonArray> getData(WireMockRuntimeInfo wireMockRuntimeInfo)
+  Future<JsonObject> getData(WireMockRuntimeInfo wireMockRuntimeInfo)
   {
-    Promise<JsonArray> promise = Promise.promise();
-    webClient.get(wireMockRuntimeInfo.getHttpBaseUrl() + "/test")
-      .addQueryParam("param", "value")
+    return webClient.getAbs(wireMockRuntimeInfo.getHttpBaseUrl() + "/test")
       .putHeader(HttpHeaderNames.ACCEPT.toString(), "application/json")
       .send()
       .map(HttpResponse::body)
-      .onSuccess(event -> {
-        try
-        {
-          promise.complete(new JsonArray(event));
-        }
-        catch (Exception e)
-        {
-          promise.fail(e);
-        }
-      })
-      .onFailure(promise::fail);
-
-    return promise.future();
+      .map(JsonObject::new);      
   }
 
   WebClient createOAuth2WebClient(Vertx vertx, WireMockRuntimeInfo wireMockRuntimeInfo)
@@ -146,7 +132,6 @@ class Reproducer
       .setRenewTokenOnForbidden(true);
 
     var oAuthOptions = new OAuth2Options()
-      .setFlow(OAuth2FlowType.CLIENT)
       .setSite(wireMockRuntimeInfo.getHttpBaseUrl())
       .setTokenPath(wireMockRuntimeInfo.getHttpBaseUrl() + "/token")
       .setClientId("clientId")
@@ -157,13 +142,13 @@ class Reproducer
     return OAuth2WebClient.create(
       WebClient.create(vertx, webClientOptions),
       OAuth2Auth.create(vertx, oAuthOptions), oAuthClientOptionOptions)
-      .withCredentials(new Oauth2Credentials());
+      .withCredentials(new Oauth2Credentials()
+      .setFlow(OAuth2FlowType.CLIENT));
   }
-
 
   private void stubToken()
   {
-    stubFor(post("/token")
+    stubFor(post("/token")    
       .willReturn(ok()
         .withHeader("Content-Type", "application/json;charset=UTF-8")
         .withBody("{\"access_token\":\"token\",\"token_type\":\"bearer\",\"expires_in\":1}")
@@ -176,9 +161,18 @@ class Reproducer
     stubFor(get("/test")
       .willReturn(ok()
         .withHeader("Content-Type", "application/json;charset=UTF-8")
-        .withBody("[]")
+        .withBody("{}")
       )
     );
+  }
+
+  private void sleep(int sec)
+  {
+    try {
+      Thread.sleep(1000*sec);
+    } catch (InterruptedException e) {
+      e.printStackTrace();
+    }    
   }
 
   private int getRandomPort()
