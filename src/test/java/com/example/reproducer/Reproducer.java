@@ -5,10 +5,8 @@ import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
 import io.netty.handler.codec.http.HttpHeaderNames;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
-import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.*;
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.auth.oauth2.OAuth2Auth;
 import io.vertx.ext.auth.oauth2.OAuth2FlowType;
@@ -79,10 +77,13 @@ class Reproducer
 
         rc.data().put("context", Vertx.currentContext().toString());
 
-        getData(wireMockRuntimeInfo)
-          .onComplete(arr -> sleep(1))
-          .onComplete(arr-> getData(wireMockRuntimeInfo)
-            .onComplete(ar -> {
+        String uri = wireMockRuntimeInfo.getHttpBaseUrl() + "/test";
+        
+        getData(uri)
+        .onFailure(rc::fail)
+        .onSuccess(arr-> getData(uri)
+          .onFailure(rc::fail)
+          .onSuccess(ar -> {
               var initialContext = rc.get("context");
               var currentContext = Vertx.currentContext().toString();
 
@@ -116,9 +117,9 @@ class Reproducer
       .onFailure(testContext::failNow);
   }
 
-  Future<JsonObject> getData(WireMockRuntimeInfo wireMockRuntimeInfo)
+  Future<JsonObject> getData(String uri)
   {
-    return webClient.getAbs(wireMockRuntimeInfo.getHttpBaseUrl() + "/test")
+    return webClient.getAbs(uri)
       .putHeader(HttpHeaderNames.ACCEPT.toString(), "application/json")
       .send()
       .map(HttpResponse::body)
@@ -129,7 +130,7 @@ class Reproducer
   {
     var oAuthClientOptionOptions = new OAuth2WebClientOptions()
       .setLeeway(0)
-      .setRenewTokenOnForbidden(true);
+      .setRenewTokenOnForbidden(false);
 
     var oAuthOptions = new OAuth2Options()
       .setSite(wireMockRuntimeInfo.getHttpBaseUrl())
@@ -161,18 +162,10 @@ class Reproducer
     stubFor(get("/test")
       .willReturn(ok()
         .withHeader("Content-Type", "application/json;charset=UTF-8")
-        .withBody("{}")
+        .withBody("{}")        
+        .withFixedDelay(1000)
       )
     );
-  }
-
-  private void sleep(int sec)
-  {
-    try {
-      Thread.sleep(1000*sec);
-    } catch (InterruptedException e) {
-      e.printStackTrace();
-    }    
   }
 
   private int getRandomPort()
